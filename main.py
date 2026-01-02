@@ -1,4 +1,11 @@
 # main.py
+"""
+The main entry point and application class for the Tetris: Neon Arcade game.
+
+This module initializes Pygame and all other game modules (UI, Logic, Network, Discord).
+It contains the main application class, `MainApp`, which manages the game's state machine,
+the main game loop, event handling, and the rendering pipeline.
+"""
 import pygame
 import sys
 from discord_manager import DiscordHandler
@@ -8,32 +15,48 @@ from logic import TetrisLogic
 from network import NetworkManager
 
 class DummySound:
+    """A dummy class to prevent crashes when sound files are not available."""
     def play(self, name):
-        pass # هیچ کاری نمیکنه، فقط جلوی ارور رو میگیره
+        """Pretends to play a sound but does nothing."""
+        pass 
 
 class MainApp:
+    """
+    The main application class. Manages the game window, states, loop, and modules.
+    """
     def __init__(self):
+        """
+        Initializes the game window, clocks, and all major components.
+        Sets up the initial game state.
+        """
         pygame.init()
+        # The screen is the actual window, which can be resized.
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
+        # The canvas is a fixed-size surface where all game elements are drawn.
+        # This canvas is then scaled to fit the window, preserving the aspect ratio.
         self.canvas = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         
         pygame.display.set_caption("TETRIS: NEON ARCADE")
         self.clock = pygame.time.Clock()
         
+        # Initialize all game components
         self.ui = ArcadeUI(self.canvas)
         self.logic = TetrisLogic()
         self.network = NetworkManager()
         
-        # --- اینجا صدای الکی رو میسازیم که ارور نده ---
+        # Use the dummy sound class to avoid errors if sounds are not implemented.
         self.sound = DummySound() 
-        # ---------------------------------------------
-
-        # تنظیمات دیسکورد
+        
+        # --- Discord Rich Presence Setup ---
+        # Replace with your actual Discord App ID and GitHub repo URL.
         YOUR_APP_ID = "1456684566101102592" 
         YOUR_GITHUB = "https://github.com/AliReza/Tetris/releases"
         self.discord = DiscordHandler(YOUR_APP_ID, YOUR_GITHUB)
         self.discord.update_presence("In Menu", "Waiting to start...")
 
+        # --- Game State Machine ---
+        # The game starts in the 'LOGIN' state if no user is saved,
+        # otherwise it jumps straight to the 'CONTROLS' screen.
         if self.network.username:
             print(f"Auto-login successful: {self.network.username}")
             self.state = "CONTROLS"
@@ -42,10 +65,17 @@ class MainApp:
             self.state = "LOGIN" 
             self.input_text = "PLAYER 1"
         
+        # Fetch the leaderboard from the server at startup.
         self.leaderboard = self.network.get_leaderboard()
 
     def run(self):
-        # یکبار زورکی اول کاری لیست رو بگیر (اگر توی init نگرفته بود)
+        """
+        The main game loop.
+        
+        This loop continuously handles input, updates game state, and draws the screen
+        until the user quits.
+        """
+        # A one-time forceful fetch if the initial one in __init__ failed.
         if not self.leaderboard or len(self.leaderboard) == 0:
              self.leaderboard = self.network.get_leaderboard()
 
@@ -53,32 +83,36 @@ class MainApp:
             self.handle_input()
             self.update()
             
-            # 1. رسم همه چیز روی بوم مجازی
+            # --- Rendering Pipeline ---
+            # 1. Draw everything onto the fixed-size canvas.
             self.draw_on_canvas()
             
-            # 2. انتقال هوشمند بوم به پنجره (با حفظ نسبت تصویر)
+            # 2. Scale the canvas to fit the resizable window while preserving aspect ratio.
             self.render_to_screen_preserve_aspect()
             
             self.clock.tick(FPS)
 
     def handle_input(self):
+        """Processes all user input from Pygame events based on the current game state."""
         events = pygame.event.get()
         for event in events:
             if event.type == pygame.QUIT:
-                pygame.quit(); sys.exit()
+                pygame.quit()
+                sys.exit()
             
             # --- LOGIN STATE ---
             if self.state == "LOGIN":
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
+                        # On Enter, register the user and move to the controls screen.
                         if self.input_text:
                             self.network.register_user(self.input_text)
                             self.state = "CONTROLS"
-                            # صدای خوش‌آمدگویی یا ورود (اختیاری)
                             self.sound.play('level') 
                     elif event.key == pygame.K_BACKSPACE:
                         self.input_text = self.input_text[:-1]
                     else:
+                        # Limit username length.
                         if len(self.input_text) < 12:
                             self.input_text += event.unicode.upper()
             
@@ -86,9 +120,10 @@ class MainApp:
             elif self.state == "CONTROLS":
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
+                        # On Enter, start the game.
                         self.state = "PLAYING"
                         self.logic.reset()
-                        self.sound.play('level') # صدای شروع بازی
+                        self.sound.play('level')
 
             # --- PLAYING STATE ---
             elif self.state == "PLAYING":
@@ -103,15 +138,15 @@ class MainApp:
                         self.logic.rotate()
                         self.sound.play('rotate')
                     
-                    elif event.key == pygame.K_DOWN: 
+                    elif event.key == pygame.K_DOWN: # Soft drop
                         if self.logic.move(0, 1): self.sound.play('move')
                     
-                    elif event.key == pygame.K_SPACE: 
-                        while self.logic.move(0, 1): pass
+                    elif event.key == pygame.K_SPACE: # Hard drop
+                        while self.logic.move(0, 1): pass # Move down until it collides
                         self.logic.lock_piece()
                         self.sound.play('drop')
                         
-                        # --- آپدیت دیسکورد وقتی امتیاز زیاد میشه (Hard Drop) ---
+                        # Update Discord presence after a significant action.
                         current_name = self.network.username if self.network.username else "Guest"
                         self.discord.update_presence(f"Score: {self.logic.score}", f"Pilot: {current_name}")
 
@@ -119,67 +154,67 @@ class MainApp:
                         self.state = "PAUSED"
                         self.discord.update_presence("Paused", "Taking a break")
 
-            # --- OTHER STATES ---
+            # --- PAUSED / GAMEOVER STATES ---
             elif self.state in ["PAUSED", "GAMEOVER"]:
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_r: 
+                    if event.key == pygame.K_r: # Restart
                         self.logic.reset()
                         self.state = "PLAYING"
                         self.sound.play('level')
-                        # آپدیت دیسکورد برای شروع مجدد
                         current_name = self.network.username if self.network.username else "Guest"
                         self.discord.update_presence("Score: 0", f"Pilot: {current_name}")
                         
-                    elif event.key == pygame.K_q:
+                    elif event.key == pygame.K_q: # Quit to menu
                         self.state = "LOGIN"
 
     def update(self):
+        """Updates game logic and animations that happen every frame."""
         self.ui.update_animation() 
         
         if self.state == "PLAYING":
             if self.logic.game_over:
-                self.sound.play('gameover') # صدای باخت
+                self.sound.play('gameover')
                 self.network.submit_score(self.logic.score)
                 self.leaderboard = self.network.get_leaderboard() 
                 
-                # --- آپدیت دیسکورد برای گیم اور ---
                 self.discord.update_presence("GAME OVER", f"Final Score: {self.logic.score}")
                 
                 self.state = "GAMEOVER"
-                return # از فانکشن خارج شو که دیگه قطعه حرکت نکنه
+                return # Exit early to prevent piece from moving after game over.
 
-            # سرعت سقوط
+            # --- Automatic Piece Gravity ---
+            # The piece falls faster if the down arrow is held.
             speed = 50 if pygame.key.get_pressed()[pygame.K_DOWN] else 500
             
+            # Using a time-based tick for consistent fall speed regardless of FPS.
             if pygame.time.get_ticks() % speed < 17: 
                  if not self.logic.move(0, 1):
                      self.logic.lock_piece()
-                     self.sound.play('drop') # صدای برخورد
+                     self.sound.play('drop')
                      
-                     # --- آپدیت دیسکورد وقتی قطعه آروم میشینه و امتیاز میگیری ---
+                     # Update Discord when a piece locks and score might change.
                      current_name = self.network.username if self.network.username else "Guest"
                      self.discord.update_presence(f"Score: {self.logic.score}", f"Pilot: {current_name}")
 
     def draw_on_canvas(self):
-        """رسم اجزای بازی روی بوم با سایز ثابت"""
+        """Draws all game components onto the fixed-size canvas."""
         self.ui.draw_background_grid()
         
+        # Center the main game area on the canvas
         layout_margin_left = 30
         game_x = layout_margin_left
         game_y = (SCREEN_HEIGHT - GAME_AREA_HEIGHT) // 2 
         
-        # رسم زمین بازی
+        # Draw the neon border around the game area
         game_rect = (game_x - 5, game_y - 5, GAME_AREA_WIDTH + 10, GAME_AREA_HEIGHT + 10)
         self.ui.draw_neon_border(game_rect)
         pygame.draw.rect(self.canvas, (10, 10, 20), (game_x, game_y, GAME_AREA_WIDTH, GAME_AREA_HEIGHT))
 
-        # محتوای بازی
+        # Draw the Tetris grid, locked pieces, and the current piece.
         self.draw_game_content(game_x, game_y)
 
-        # سایدبار
+        # --- Sidebar ---
         sidebar_x = game_x + GAME_AREA_WIDTH + 40
-        
-        # --- فیکس: پیدا کردن نام کاربر برای ارسال به UI ---
         current_name = self.network.username if self.network.username else "GUEST"
         
         self.ui.draw_sidebar(
@@ -187,11 +222,12 @@ class MainApp:
             game_y, 
             self.logic.score, 
             self.leaderboard, 
-            self.logic, 
-            current_name  # <--- این آرگومان جا افتاده بود!
+            self.logic, # Pass the logic object to access next_piece etc.
+            current_name 
         )
 
-        # اورلی‌ها
+        # --- Overlays ---
+        # Draw modal pop-ups based on the game state.
         if self.state == "LOGIN":
             self.draw_overlay_login()
         elif self.state == "CONTROLS":
@@ -203,51 +239,54 @@ class MainApp:
 
     def render_to_screen_preserve_aspect(self):
         """
-        این تابع جادویی برای حفظ نسبت تصویر است!
-        محاسبه می‌کند که چقدر باید زوم کند تا تصویر فیت شود،
-        بدون اینکه دفرمه شود. جاهای خالی را سیاه می‌کند.
+        Scales the canvas to the window size while maintaining the aspect ratio.
+        This prevents the game from looking stretched or distorted on different
+        window sizes. Any empty space is filled with black bars ("letterboxing").
         """
         window_w, window_h = self.screen.get_size()
         canvas_w, canvas_h = self.canvas.get_size()
 
-        # محاسبه نسبت مقیاس
+        # Calculate the scaling factor for width and height.
         scale_w = window_w / canvas_w
         scale_h = window_h / canvas_h
-        scale = min(scale_w, scale_h) # کمترین مقیاس رو انتخاب می‌کنیم تا همه چی جا بشه
+        # Use the smaller of the two to ensure the whole canvas fits.
+        scale = min(scale_w, scale_h)
 
-        # سایز جدید بوم
+        # Calculate the new dimensions of the scaled canvas.
         new_w = int(canvas_w * scale)
         new_h = int(canvas_h * scale)
 
-        # محاسبه فاصله برای وسط‌چین کردن
+        # Calculate the top-left position to center the scaled canvas.
         offset_x = (window_w - new_w) // 2
         offset_y = (window_h - new_h) // 2
 
-        # 1. صفحه رو سیاه کن (برای حاشیه‌ها)
+        # 1. Fill the entire window with black (for letterboxing).
         self.screen.fill((0, 0, 0))
 
-        # 2. تغییر سایز بوم
+        # 2. Scale the canvas to the new dimensions.
         scaled_surf = pygame.transform.scale(self.canvas, (new_w, new_h))
 
-        # 3. رسم بوم وسط صفحه
+        # 3. Blit (draw) the scaled canvas onto the screen at the centered position.
         self.screen.blit(scaled_surf, (offset_x, offset_y))
 
         pygame.display.flip()
 
     def draw_game_content(self, start_x, start_y):
-        # رسم گرید و قطعات (مثل قبل)
+        """Draws the Tetris grid, locked pieces, and the active piece."""
+        # Draw the locked pieces on the board.
         for y in range(GRID_HEIGHT):
             for x in range(GRID_WIDTH):
                 val = self.logic.board[y][x]
-                if val > 0:
+                if val > 0: # val > 0 means it's a colored block.
                     color_tuple = SHAPE_COLORS[(val-1) % len(SHAPE_COLORS)]
-                    px = start_x + x*BLOCK_SIZE
-                    py = start_y + y*BLOCK_SIZE
+                    px = start_x + x * BLOCK_SIZE
+                    py = start_y + y * BLOCK_SIZE
                     self.ui.draw_3d_block(px, py, color_tuple)
-                else:
+                else: # val == 0 means it's an empty grid cell.
                     rect = (start_x + x*BLOCK_SIZE, start_y + y*BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE)
-                    pygame.draw.rect(self.canvas, (20, 20, 40), rect, 1)
+                    pygame.draw.rect(self.canvas, (20, 20, 40), rect, 1) # Draw grid lines.
 
+        # Draw the currently falling piece if the game is active.
         if self.logic.current_piece and self.state == "PLAYING":
             for cy, row in enumerate(self.logic.current_piece):
                 for cx, val in enumerate(row):
@@ -258,8 +297,10 @@ class MainApp:
                         self.ui.draw_3d_block(px, py, color_tuple)
 
     def draw_overlay_login(self):
+        """Draws the user login/creation screen."""
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        overlay.set_alpha(200); overlay.fill((0,0,0))
+        overlay.set_alpha(200)
+        overlay.fill((0,0,0))
         self.canvas.blit(overlay, (0,0))
 
         center_x, center_y = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
@@ -269,6 +310,7 @@ class MainApp:
 
         self.ui.draw_text_pulsing("WELCOME PLAYER", (center_x, center_y - 60), (0, 255, 255), "title")
         
+        # Username input box
         input_rect = pygame.Rect(center_x - 150, center_y, 300, 50)
         pygame.draw.rect(self.canvas, (255, 255, 255), input_rect, border_radius=5)
         
@@ -280,8 +322,10 @@ class MainApp:
         self.canvas.blit(msg, (center_x - 100, center_y + 70))
 
     def draw_overlay_message(self, title, msg, sub_text=""):
+        """A generic function to draw a message overlay (e.g., Paused, Game Over)."""
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        overlay.set_alpha(180); overlay.fill((0,0,0))
+        overlay.set_alpha(180)
+        overlay.fill((0,0,0))
         self.canvas.blit(overlay, (0,0))
 
         center_x, center_y = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
@@ -295,6 +339,7 @@ class MainApp:
              sub = self.ui.font_pixel.render(sub_text, True, (200, 200, 200))
              self.canvas.blit(sub, (center_x - 100, center_y + 60))
 
+# This block ensures the code runs only when the script is executed directly.
 if __name__ == "__main__":
     app = MainApp()
     app.run()
